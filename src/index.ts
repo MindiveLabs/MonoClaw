@@ -31,7 +31,8 @@ import {
 } from './db.js';
 import { loadAgentConfigs } from './config.js';
 import { startApi } from './api.js';
-import { logger } from './logger.js';
+import { flushLogger, logger } from './logger.js';
+import { printStdioBanner } from './channels/stdio.js';
 import type { AgentFileConfig } from './config.js';
 
 const OUTBOX_POLL_MS = 2_000;
@@ -96,6 +97,8 @@ async function main(): Promise<void> {
   startOutboxFlush(channels);
 
   logger.info('MonoClaw ready');
+  flushLogger();
+  printStdioBanner(agentConfigs.map((c) => c.name));
 
   // Graceful shutdown
   for (const sig of ['SIGINT', 'SIGTERM'] as const) {

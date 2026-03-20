@@ -1,26 +1,33 @@
 /**
  * Agent configuration loader.
  *
- * Each file in config/agents/*.json defines one agent.
- * The filename (without .json) is the agent name.
+ * Each subdirectory under config/agents/ defines one agent.
+ * The directory name is the agent name.
  *
- * Schema:
+ * Directory layout:
+ *   config/agents/<name>/
+ *     <name>.json   — agent config (required)
+ *     <name>.md     — agent memory / AGENTS.md source (created on first start if absent)
+ *     skills/       — drop skill files here; auto-included at startup
+ *
+ * Schema for <name>.json:
  *   {
  *     "workspacePath": ".runtime/workspaces/alice",   // relative or absolute
  *     "sessionDir":    ".runtime/sessions/alice",     // relative or absolute
  *     "model":         "claude-opus-4-5",             // optional model override
- *     "skills":        ["./skills/my-skill"],         // optional skill paths
+ *     "skills":        ["./extra/skill"],             // optional extra skill paths
  *     "routing": [
  *       { "channel": "telegram", "chatId": "123456789" },
  *       { "channel": "stdio",    "chatId": "alice" }
  *     ]
  *   }
  *
- * memoryPath is derived automatically as <workspacePath>/AGENTS.md.
- * Relative paths are resolved against process.cwd().
+ * The skills/ subdirectory is always prepended to the skills list automatically.
+ * Relative paths in "skills" are resolved against process.cwd().
+ * memoryPath is derived as <agentDir>/<name>.md.
  */
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, isAbsolute, resolve, basename } from 'node:path';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, isAbsolute, resolve } from 'node:path';
 import { z } from 'zod';
 import type { AgentConfig } from './types.js';
 
@@ -57,12 +64,16 @@ export function loadAgentConfigs(): AgentFileConfig[] {
     return [];
   }
 
-  const files = readdirSync(CONFIG_DIR).filter((f) => f.endsWith('.json'));
+  const entries = readdirSync(CONFIG_DIR).filter((entry) =>
+    statSync(join(CONFIG_DIR, entry)).isDirectory(),
+  );
   const configs: AgentFileConfig[] = [];
 
-  for (const file of files) {
-    const filePath = join(CONFIG_DIR, file);
-    const name = basename(file, '.json');
+  for (const name of entries) {
+    const agentDir = join(CONFIG_DIR, name);
+    const filePath = join(agentDir, `${name}.json`);
+
+    if (!existsSync(filePath)) continue;  // skip dirs without a matching JSON
 
     let raw: unknown;
     try {
@@ -81,18 +92,19 @@ export function loadAgentConfigs(): AgentFileConfig[] {
     }
 
     const { workspacePath, sessionDir, model, skills, routing } = parsed.data;
-    const resolvedWorkspace = resolvePath(workspacePath);
+
+    // Auto-include the agent's skills/ subdirectory if it exists
+    const skillsDir = join(agentDir, 'skills');
+    const autoSkills = existsSync(skillsDir) ? [skillsDir] : [];
+    const allSkills = [...autoSkills, ...(skills?.map(resolvePath) ?? [])];
 
     configs.push({
       name,
-      workspacePath: resolvedWorkspace,
-      // Source of truth for agent memory lives next to the config JSON so it
-      // is easy to find and edit. agent.ts copies it into the workspace on
-      // each startup so pimono discovers it via its AGENTS.md walk.
-      memoryPath: join(CONFIG_DIR, `${name}.md`),
+      workspacePath: resolvePath(workspacePath),
+      memoryPath: join(agentDir, `${name}.md`),
       sessionDir: resolvePath(sessionDir),
       model,
-      skills: skills?.map(resolvePath),
+      skills: allSkills.length ? allSkills : undefined,
       routing,
     });
   }
