@@ -9,6 +9,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { EventEmitter } from 'node:events';
+import { pathToFileURL } from 'node:url';
 import pino from 'pino';
 
 const testDir = join(tmpdir(), `monoclaw-agent-test-${Date.now()}`);
@@ -29,12 +30,14 @@ vi.mock('../src/db.js', () => ({
   storeMessage: vi.fn(),
 }));
 
-const { AgentProcess } = await import('../src/agent.js');
+const { AgentProcess, resolveWorkerRuntime } = await import('../src/agent.js');
 
 const cfg = {
   name: 'test-agent',
   workspacePath: join(testDir, 'workspace'),
-  memoryPath: join(testDir, 'workspace', 'AGENTS.md'),
+  // memoryPath is the config source (config/agents/<name>.md),
+  // NOT the workspace copy — agent.ts copies it into the workspace.
+  memoryPath: join(testDir, 'config', 'agents', 'test-agent.md'),
   sessionDir: join(testDir, 'sessions'),
 };
 
@@ -71,11 +74,41 @@ describe('AgentProcess', () => {
     await agent.stop();
   });
 
-  it('T1: AGENTS.md is created if missing', async () => {
+  it('T1: AGENTS.md source is created in config and copied to workspace', async () => {
     const agent = new AgentProcess(cfg, 9999, logger);
     await agent.start();
-    const { existsSync } = await import('node:fs');
+    const { existsSync, join: pathJoin } = await import('node:fs').then(
+      async (fs) => ({ existsSync: fs.existsSync, join: (await import('node:path')).join }),
+    );
+    // Config source file created
     expect(existsSync(cfg.memoryPath)).toBe(true);
+    // Workspace copy created for pimono
+    expect(existsSync(pathJoin(cfg.workspacePath, 'AGENTS.md'))).toBe(true);
     await agent.stop();
+  });
+});
+
+describe('resolveWorkerRuntime', () => {
+  it('prefers worker.js when present', () => {
+    const dir = join(testDir, 'runtime-js');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'worker.js'), 'export {};\n', 'utf-8');
+    writeFileSync(join(dir, 'worker.ts'), 'export {};\n', 'utf-8');
+    writeFileSync(join(dir, 'agent.ts'), 'export {};\n', 'utf-8');
+
+    const runtime = resolveWorkerRuntime(pathToFileURL(join(dir, 'agent.ts')).href);
+    expect(runtime.scriptPath).toBe(join(dir, 'worker.js'));
+    expect(runtime.requiresTsxLoader).toBe(false);
+  });
+
+  it('falls back to worker.ts when worker.js is missing', () => {
+    const dir = join(testDir, 'runtime-ts');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'worker.ts'), 'export {};\n', 'utf-8');
+    writeFileSync(join(dir, 'agent.ts'), 'export {};\n', 'utf-8');
+
+    const runtime = resolveWorkerRuntime(pathToFileURL(join(dir, 'agent.ts')).href);
+    expect(runtime.scriptPath).toBe(join(dir, 'worker.ts'));
+    expect(runtime.requiresTsxLoader).toBe(true);
   });
 });

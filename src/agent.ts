@@ -9,23 +9,44 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import type { Logger } from 'pino';
 import { buildSandboxedSpawn } from './sandbox.js';
 import { upsertSessionFile, enqueueOutbox, storeMessage } from './db.js';
 import type { AgentConfig, WorkerOutbound } from './types.js';
 
-// Worker script path (dist/worker.js when built, src/worker.ts when using tsx)
-const WORKER_SCRIPT = fileURLToPath(new URL('./worker.js', import.meta.url));
+export interface WorkerRuntime {
+  scriptPath: string;
+  requiresTsxLoader: boolean;
+}
+
+export function resolveWorkerRuntime(importMetaUrl: string): WorkerRuntime {
+  // Built runtime: dist/worker.js exists next to dist/agent.js
+  const jsPath = fileURLToPath(new URL('./worker.js', importMetaUrl));
+  if (existsSync(jsPath)) {
+    return { scriptPath: jsPath, requiresTsxLoader: false };
+  }
+
+  // Dev runtime: src/worker.ts exists next to src/agent.ts
+  const tsPath = fileURLToPath(new URL('./worker.ts', importMetaUrl));
+  if (existsSync(tsPath)) {
+    return { scriptPath: tsPath, requiresTsxLoader: true };
+  }
+
+  throw new Error(`Worker entrypoint not found next to ${importMetaUrl}`);
+}
+
+const WORKER_RUNTIME = resolveWorkerRuntime(import.meta.url);
 
 export type AgentEndHandler = (agentName: string) => void;
 
-export class AgentProcess {
+export class AgentProcess extends EventEmitter {
   private proc: ChildProcess | null = null;
-  private queue: Array<{ prompt: string; chatId: string; channelName: string }> = [];
+  private queue: Array<{ requestId: string; prompt: string; chatId: string; channelName: string }> = [];
+  private currentRequestId: string | null = null;
   private busy = false;
   private restartCount = 0;
   private stopping = false;
@@ -35,18 +56,26 @@ export class AgentProcess {
     readonly config: AgentConfig,
     private readonly proxyPort: number,
     private readonly logger: Logger,
-  ) {}
+  ) {
+    super();
+  }
 
   setAgentEndHandler(fn: AgentEndHandler): void {
     this.onAgentEnd = fn;
   }
 
   async start(): Promise<void> {
+    this.stopping = false;
+    this.restartCount = 0;
+    this.busy = false;
     // Ensure workspace and session dirs exist
     mkdirSync(this.config.workspacePath, { recursive: true });
     mkdirSync(this.config.sessionDir, { recursive: true });
 
-    // Write AGENTS.md memory file if it doesn't exist
+    // config/agents/<name>.md is the editable source of truth for agent memory.
+    // Ensure it exists, then copy it into the workspace so pimono can discover
+    // it via its AGENTS.md walk (cwd = workspacePath).
+    mkdirSync(dirname(this.config.memoryPath), { recursive: true });
     if (!existsSync(this.config.memoryPath)) {
       writeFileSync(
         this.config.memoryPath,
@@ -54,6 +83,11 @@ export class AgentProcess {
         'utf-8',
       );
     }
+    writeFileSync(
+      join(this.config.workspacePath, 'AGENTS.md'),
+      readFileSync(this.config.memoryPath, 'utf-8'),
+      'utf-8',
+    );
 
     this.spawnWorker();
   }
@@ -61,29 +95,51 @@ export class AgentProcess {
   async stop(): Promise<void> {
     this.stopping = true;
     if (this.proc) {
-      this.proc.stdin?.end();
-      this.proc.kill('SIGTERM');
+      const proc = this.proc;
       this.proc = null;
+      // Notify any open SSE streams that the in-flight request was abandoned.
+      if (this.busy && this.currentRequestId) {
+        this.emit('interrupt', { requestId: this.currentRequestId });
+      }
+      // Signal EOF on stdin: the worker's readline loop will end naturally after
+      // the current session.prompt() call finishes, letting pimono flush the
+      // session file before exiting. This prevents orphaned user messages.
+      proc.stdin?.end();
+      // Wait up to 10 s for the worker to exit cleanly, then SIGTERM as fallback.
+      await new Promise<void>((resolve) => {
+        const timeout = setTimeout(() => {
+          proc.kill('SIGTERM');
+          resolve();
+        }, 10_000);
+        proc.once('exit', () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+      });
     }
   }
 
   /**
    * Queue a prompt for this agent. If the agent is currently processing
    * a previous prompt, this is enqueued and processed after the current one.
+   * Returns a requestId that can be used to correlate the 'response' event.
    */
-  prompt(text: string, chatId: string, channelName: string): void {
-    this.queue.push({ prompt: text, chatId, channelName });
+  prompt(text: string, chatId: string, channelName: string): string {
+    const requestId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    this.queue.push({ requestId, prompt: text, chatId, channelName });
     this.logger.debug(
       { agent: this.config.name, queueDepth: this.queue.length, chatId, channelName, chars: text.length },
       'prompt queued',
     );
     this.drainQueue();
+    return requestId;
   }
 
   private drainQueue(): void {
     if (this.busy || this.queue.length === 0 || !this.proc) return;
     const next = this.queue.shift()!;
     this.busy = true;
+    this.currentRequestId = next.requestId;
     storeMessage(this.config.name, next.channelName, 'inbound', next.prompt);
     const msg = JSON.stringify({
       type: 'prompt',
@@ -127,14 +183,21 @@ export class AgentProcess {
       HOME: process.env.HOME ?? '',
       TMPDIR: process.env.TMPDIR ?? '/tmp',
     };
+    if (WORKER_RUNTIME.requiresTsxLoader) {
+      const existingNodeOptions = process.env.NODE_OPTIONS?.trim();
+      env.NODE_OPTIONS = existingNodeOptions
+        ? `${existingNodeOptions} --import tsx`
+        : '--import tsx';
+    }
 
     const { cmd, args, spawnOpts } = buildSandboxedSpawn(
-      WORKER_SCRIPT,
+      WORKER_RUNTIME.scriptPath,
       [],
       env,
       {
         agentName: this.config.name,
         workspacePath: this.config.workspacePath,
+        sessionDir: this.config.sessionDir,
         proxyPort: this.proxyPort,
         nodeModulesPath,
         nodePath,
@@ -147,6 +210,7 @@ export class AgentProcess {
     });
 
     this.logger.info({ agent: this.config.name, pid: this.proc.pid }, 'worker started');
+    this.drainQueue();
 
     // Stream stderr to our logger
     this.proc.stderr?.on('data', (data: Buffer) => {
@@ -200,7 +264,10 @@ export class AgentProcess {
     }
 
     if (msg.type === 'text_delta') {
-      // Streaming delta — could be forwarded for streaming channels in the future
+      // Emit delta for SSE streaming (API consumers)
+      if (this.currentRequestId) {
+        this.emit('delta', { requestId: this.currentRequestId, text: msg.delta });
+      }
       return;
     }
 
@@ -209,15 +276,23 @@ export class AgentProcess {
       if (msg.channelName === '__session_init__') return;
 
       const { response, chatId, channelName } = msg;
+      const requestId = this.currentRequestId ?? '';
+      this.currentRequestId = null;
       this.logger.debug(
         { agent: this.config.name, channelName, chatId, responseChars: response.length },
         'worker completed prompt',
       );
       if (response && channelName) {
         storeMessage(this.config.name, channelName, 'outbound', response);
-        enqueueOutbox(channelName, chatId, response);
-        this.onAgentEnd?.(this.config.name);
+        // __api__ channel: response is delivered via event, not through the outbox
+        if (channelName !== '__api__') {
+          enqueueOutbox(channelName, chatId, response);
+          this.onAgentEnd?.(this.config.name);
+        }
       }
+
+      // Notify API/SSE listeners
+      this.emit('response', { requestId, text: response, chatId, channelName });
 
       // Reset the restart counter on successful completion
       this.restartCount = 0;
