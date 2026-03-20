@@ -2,15 +2,20 @@
  * MonoClaw orchestrator.
  *
  * Startup sequence:
- *   1. Start credential proxy (injects real API key for sandboxed workers)
- *   2. Load agents from SQLite and spawn sandboxed workers
- *   3. Start message channels (Telegram, stdio)
- *   4. Route inbound messages → agents via routing table
- *   5. Flush outbox → channels on a poll interval
+ *   1. Load config/.env into process.env (env.ts runs as a side effect)
+ *   2. Start credential proxy (injects real API key for sandboxed workers)
+ *   3. Load agents from config/agents/*.json and spawn sandboxed workers
+ *   4. Start message channels (Telegram, stdio)
+ *   5. Route inbound messages → agents via config routing table
+ *   6. Flush outbox → channels on a poll interval
  *
- * To add an agent, call `upsertAgent()` and restart MonoClaw.
- * To add a channel routing, call `setRouting()`.
+ * To add an agent: create config/agents/<name>.json and restart.
+ * To change routing: edit the "routing" array in the agent config and restart.
  */
+
+// env.ts MUST be first — it loads config/.env before any channel module reads
+// process.env (channels self-register at module evaluation time).
+import './env.js';
 import './channels/telegram.js';
 import './channels/stdio.js';
 
@@ -18,31 +23,39 @@ import { startCredentialProxy } from './credential-proxy.js';
 import { AgentProcess } from './agent.js';
 import { getAllChannels } from './channels/index.js';
 import {
-  getAllAgents,
-  resolveAgent,
   getPendingOutbox,
   markOutboxSent,
   markOutboxFailed,
   getDb,
+  DATA_DIR,
 } from './db.js';
+import { loadAgentConfigs } from './config.js';
+import { startApi } from './api.js';
 import { logger } from './logger.js';
-import type { AgentConfig } from './types.js';
+import type { AgentFileConfig } from './config.js';
 
-const OUTBOX_POLL_MS = 2_000;   // How often to flush pending outbox rows
+const OUTBOX_POLL_MS = 2_000;
+
+// (channelName + ':' + chatId) → AgentProcess
+const routingMap = new Map<string, AgentProcess>();
 const agents = new Map<string, AgentProcess>();
 
 async function main(): Promise<void> {
   logger.info('MonoClaw starting');
 
+  // Open the DB immediately so .runtime/ is created on startup rather than
+  // waiting for the first outbox flush or message.
+  getDb();
+
   // 1. Start credential proxy
   const { port: proxyPort } = await startCredentialProxy(logger);
   logger.info({ proxyPort }, 'credential proxy ready');
 
-  // 2. Load agents and spawn workers
-  const agentConfigs = getAllAgents();
+  // 2. Load agents from config/agents/*.json
+  const agentConfigs = loadAgentConfigs();
   if (agentConfigs.length === 0) {
     logger.warn(
-      'No agents configured. Add agents via upsertAgent() then restart.',
+      'No agents configured. Create config/agents/<name>.json and restart.',
     );
   }
 
@@ -50,7 +63,10 @@ async function main(): Promise<void> {
     await spawnAgent(cfg, proxyPort);
   }
 
-  // 3. Start channels
+  // 3. Start HTTP API
+  await startApi(agents, agentConfigs, DATA_DIR, logger.child({ component: 'api' }));
+
+  // 4. Start channels
   const channels = getAllChannels();
   if (channels.length === 0) {
     logger.warn(
@@ -60,17 +76,13 @@ async function main(): Promise<void> {
 
   for (const channel of channels) {
     channel.onMessage(async (msg) => {
-      const agentName = resolveAgent(msg.channelName, msg.chatId);
-      if (!agentName) {
+      const key = `${msg.channelName}:${msg.chatId}`;
+      const agent = routingMap.get(key);
+      if (!agent) {
         logger.warn(
           { channel: msg.channelName, chatId: msg.chatId },
-          'no routing entry — message dropped. Add via setRouting().',
+          'no routing entry — message dropped. Add routing in config/agents/<name>.json.',
         );
-        return;
-      }
-      const agent = agents.get(agentName);
-      if (!agent) {
-        logger.error({ agentName }, 'agent not found in registry');
         return;
       }
       agent.prompt(msg.text, msg.chatId, msg.channelName);
@@ -80,7 +92,7 @@ async function main(): Promise<void> {
     logger.info({ channel: channel.name }, 'channel started');
   }
 
-  // 4. Outbox flush loop
+  // 5. Outbox flush loop
   startOutboxFlush(channels);
 
   logger.info('MonoClaw ready');
@@ -97,14 +109,20 @@ async function main(): Promise<void> {
   }
 }
 
-async function spawnAgent(cfg: AgentConfig, proxyPort: number): Promise<void> {
+async function spawnAgent(
+  cfg: AgentFileConfig,
+  proxyPort: number,
+): Promise<void> {
   const agent = new AgentProcess(cfg, proxyPort, logger.child({ agent: cfg.name }));
-  agent.setAgentEndHandler((_agentName) => {
-    // Outbox is flushed on the poll interval; nothing extra to do here.
-  });
   agents.set(cfg.name, agent);
+
+  // Register every (channel, chatId) route declared in the config
+  for (const r of cfg.routing) {
+    routingMap.set(`${r.channel}:${r.chatId}`, agent);
+  }
+
   await agent.start();
-  logger.info({ agent: cfg.name }, 'agent ready');
+  logger.info({ agent: cfg.name, routes: cfg.routing.length }, 'agent ready');
 }
 
 function startOutboxFlush(
