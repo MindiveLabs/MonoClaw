@@ -3,6 +3,26 @@
 All notable changes to MonoClaw are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.2] - 2026-03-20
+
+### Added
+- **Agent-switching in stdio TUI**: `/agent <name>` command lets the user switch between agents
+  at any time. Typing `/agent` alone (or with an unknown name) shows usage and the agent list.
+- **Smarter stdio banner**: `printStdioBanner()` now shows a context-aware welcome message.
+  Single-agent mode: `Chatting with alice. Type a message and press Enter.`
+  Multi-agent mode: `Agents: alice, bob  •  <agent> <message> or /agent <name> to set active.`
+- **Per-agent skills directory** (`config/agents/<name>/skills/`): Auto-included at startup.
+  Skills placed here are prepended to the skills list with no JSON config needed.
+- **Subdirectory config layout** (`config/agents/<name>/`): Each agent now lives in its own
+  subdirectory containing `<name>.json`, `<name>.md`, and an empty `skills/` folder as a hint.
+
+### Changed
+- **Config directory structure**: Agent JSON/MD files moved from flat `config/agents/<name>.json`
+  to `config/agents/<name>/<name>.json`. `memoryPath` now points to `<agentDir>/<name>.md`.
+- **Log output to stderr**: Startup logs now go to `stderr`; the TUI prompt/responses go to
+  `stdout`. Eliminates interleaving between pino-pretty's async writes and the banner.
+- **Response format**: Responses now formatted as `alice: text` (was `[alice] text`).
+
 ## [0.2.1] - 2026-03-20
 
 ### Added

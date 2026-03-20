@@ -92,14 +92,20 @@ cp config/.env.example config/.env
 # edit config/.env — set ANTHROPIC_API_KEY and optionally TELEGRAM_BOT_TOKEN
 ```
 
-Agent definitions live in `config/agents/`. An example `alice.json` is included. Copy and edit it for each agent you want to run:
+Agent definitions live in `config/agents/`. An example `alice/` directory is included. Create a new subdirectory for each agent:
 
 ```bash
-cp config/agents/alice.json config/agents/mybot.json
-# edit config/agents/mybot.json
+mkdir -p config/agents/mybot
+cp config/agents/alice/alice.json config/agents/mybot/mybot.json
+# edit config/agents/mybot/mybot.json
 ```
 
-Each file defines one agent:
+Each agent directory contains:
+- `<name>.json` — agent config (required)
+- `<name>.md` — agent memory / persona (created automatically on first run)
+- `skills/` — drop skill files here; auto-included at startup
+
+`<name>.json` schema:
 
 ```json
 {
@@ -114,8 +120,10 @@ Each file defines one agent:
 
 - **`workspacePath`** / **`sessionDir`** — relative paths are resolved from the project root; absolute paths work too
 - **`routing`** — list every `(channel, chatId)` pair that should reach this agent; for Telegram, `chatId` is the numeric chat/user ID
+- **`model`** — optional model override (e.g. `"claude-opus-4-5"`)
+- **`skills`** — optional array of extra skill paths (relative or absolute); the `skills/` subdirectory is always prepended automatically
 
-Each agent also gets a memory file at `config/agents/<name>.md` (created automatically on first run if absent). Edit it to give the agent a persona, instructions, or persistent context. On every startup MonoClaw copies it into the workspace so pimono's `AGENTS.md` discovery picks it up — no extra wiring needed.
+Edit `config/agents/<name>/<name>.md` to give the agent a persona, instructions, or persistent context. On every startup MonoClaw copies it into the workspace so pimono's `AGENTS.md` discovery picks it up — no extra wiring needed.
 
 To add or change routing, edit the JSON and restart MonoClaw.
 
@@ -253,7 +261,7 @@ sessions  — latest pimono session file per agent
 outbox    — pending channel deliveries (retry up to 5x, then dead-letter)
 ```
 
-Agent definitions and routing are stored in `config/agents/*.json`, not in SQLite, so they are human-readable and version-controllable.
+Agent definitions and routing are stored under `config/agents/<name>/`, not in SQLite, so they are human-readable and version-controllable.
 
 ## Development
 
@@ -272,8 +280,10 @@ config/
   .env.example        env template (copy to config/.env and fill in keys)
   .env                secret env vars — git-ignored
   agents/
-    alice.json        example agent definition (copy for each agent)
-    alice.md          agent memory / persona (copied to workspace on each start)
+    alice/
+      alice.json      agent config (workspacePath, sessionDir, routing, model, skills)
+      alice.md        agent memory / persona (copied to workspace on each start)
+      skills/         drop skill files here; auto-included at startup
 src/
   index.ts            orchestrator entry point
   env.ts              loads config/.env at startup (side-effect import)
@@ -297,5 +307,8 @@ test/
   db.test.ts
   credential-proxy.test.ts
   sandbox.test.ts
-  channels/telegram.test.ts
+  worker-rollback.test.ts
+  channels/
+    telegram.test.ts
+    stdio.test.ts
 ```

@@ -1,6 +1,7 @@
 {
   "workspacePath": ".runtime/workspaces/alice",
   "sessionDir": ".runtime/sessions/alice",
+  "model": "claude-opus-4-5",
   "routing": [
     { "channel": "stdio", "chatId": "alice" }
   ]
