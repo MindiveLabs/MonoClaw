@@ -5,6 +5,8 @@ export interface AgentConfig {
   workspacePath: string;   // Isolated workspace directory for this agent
   memoryPath: string;      // Path to AGENTS.md context file
   sessionDir: string;      // Persistent pimono session directory (survives restarts)
+  model?: string;          // Model ID override (e.g. "claude-opus-4-5")
+  skills?: string[];       // Additional skill paths (files or directories)
 }
 
 // Channels operate on channel-specific IDs (Telegram chat_id, etc.).

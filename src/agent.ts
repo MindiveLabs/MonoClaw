@@ -182,6 +182,8 @@ export class AgentProcess extends EventEmitter {
       PATH: process.env.PATH ?? '',
       HOME: process.env.HOME ?? '',
       TMPDIR: process.env.TMPDIR ?? '/tmp',
+      ...(this.config.model ? { MONOCLAW_MODEL: this.config.model } : {}),
+      ...(this.config.skills?.length ? { MONOCLAW_SKILLS: JSON.stringify(this.config.skills) } : {}),
     };
     if (WORKER_RUNTIME.requiresTsxLoader) {
       const existingNodeOptions = process.env.NODE_OPTIONS?.trim();

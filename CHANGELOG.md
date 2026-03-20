@@ -3,6 +3,17 @@
 All notable changes to MonoClaw are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.1] - 2026-03-20
+
+### Added
+- **Per-agent model override** (`config/agents/<name>.json`): Optional `"model"` field lets
+  each agent specify a different model ID (e.g. `"claude-opus-4-5"`). Passed to the worker
+  subprocess as `MONOCLAW_MODEL` env var and used when creating the pimono session.
+- **Per-agent skill paths** (`config/agents/<name>.json`): Optional `"skills"` field accepts
+  an array of paths (relative or absolute) to additional skill directories or files. Paths are
+  resolved against `process.cwd()`, JSON-serialized into `MONOCLAW_SKILLS`, and injected into
+  the worker's `DefaultResourceLoader` so pimono loads them at session startup.
+
 ## [0.2.0] - 2026-03-20
 
 ### Added

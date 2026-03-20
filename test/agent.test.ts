@@ -31,6 +31,7 @@ vi.mock('../src/db.js', () => ({
 }));
 
 const { AgentProcess, resolveWorkerRuntime } = await import('../src/agent.js');
+const { buildSandboxedSpawn } = await import('../src/sandbox.js');
 
 const cfg = {
   name: 'test-agent',
@@ -70,6 +71,26 @@ describe('AgentProcess', () => {
       agent.prompt('first message', 'chat1', 'stdio');
       agent.prompt('second message', 'chat1', 'stdio'); // should be queued, not dropped
     }).not.toThrow();
+
+    await agent.stop();
+  });
+
+  it('T6: model and skills from config are passed as env vars to worker', async () => {
+    const cfgWithExtras = {
+      ...cfg,
+      model: 'claude-opus-4-5',
+      skills: ['/some/skill/path'],
+    };
+    const spy = vi.mocked(buildSandboxedSpawn);
+    spy.mockClear();
+
+    const agent = new AgentProcess(cfgWithExtras, 9999, logger);
+    await agent.start();
+
+    expect(spy).toHaveBeenCalled();
+    const envArg = spy.mock.calls[0]![2] as Record<string, string | undefined>;
+    expect(envArg['MONOCLAW_MODEL']).toBe('claude-opus-4-5');
+    expect(JSON.parse(envArg['MONOCLAW_SKILLS']!)).toEqual(['/some/skill/path']);
 
     await agent.stop();
   });

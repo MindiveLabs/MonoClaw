@@ -23,6 +23,7 @@
  */
 import {
   createAgentSession,
+  DefaultResourceLoader,
   SessionManager,
   AuthStorage,
 } from '@mariozechner/pi-coding-agent';
@@ -34,6 +35,9 @@ const WORKSPACE = process.env.MONOCLAW_WORKSPACE;
 const SESSION_DIR = process.env.MONOCLAW_SESSION_DIR;
 const MEMORY_PATH = process.env.MONOCLAW_MEMORY_PATH;
 const PROXY_PORT = process.env.MONOCLAW_PROXY_PORT;
+const SKILL_PATHS: string[] = process.env.MONOCLAW_SKILLS
+  ? (JSON.parse(process.env.MONOCLAW_SKILLS) as string[])
+  : [];
 
 if (!WORKSPACE || !SESSION_DIR) {
   emit({ type: 'error', message: 'MONOCLAW_WORKSPACE and MONOCLAW_SESSION_DIR must be set' });
@@ -140,10 +144,18 @@ async function main(): Promise<void> {
   // Build createAgentSession options. If we have a proxy, we need to pass a
   // model with the proxy baseUrl. We let pimono pick the default model from
   // settings/env, then patch the baseUrl below via a model override if needed.
+  // Build a resource loader so we can inject per-agent skill paths.
+  const resourceLoader = new DefaultResourceLoader({
+    cwd: WORKSPACE,
+    additionalSkillPaths: SKILL_PATHS,
+  });
+  await resourceLoader.reload();
+
   const sessionOpts: Parameters<typeof createAgentSession>[0] = {
     cwd: WORKSPACE,
     sessionManager,
     authStorage,
+    resourceLoader,
   };
 
   // If a proxy is configured, create a custom model pointing to it.

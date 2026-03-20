@@ -1,6 +1,6 @@
 {
   "name": "monoclaw",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Lightweight multi-agent runtime: pimono agents + OS-level sandboxing + message channels.",
   "type": "module",
   "main": "dist/index.js",

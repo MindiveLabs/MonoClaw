@@ -8,6 +8,8 @@
  *   {
  *     "workspacePath": ".runtime/workspaces/alice",   // relative or absolute
  *     "sessionDir":    ".runtime/sessions/alice",     // relative or absolute
+ *     "model":         "claude-opus-4-5",             // optional model override
+ *     "skills":        ["./skills/my-skill"],         // optional skill paths
  *     "routing": [
  *       { "channel": "telegram", "chatId": "123456789" },
  *       { "channel": "stdio",    "chatId": "alice" }
@@ -32,6 +34,8 @@ const RoutingEntrySchema = z.object({
 const AgentFileSchema = z.object({
   workspacePath: z.string().min(1),
   sessionDir: z.string().min(1),
+  model: z.string().optional(),
+  skills: z.array(z.string()).optional(),
   routing: z.array(RoutingEntrySchema).default([]),
 });
 
@@ -76,7 +80,7 @@ export function loadAgentConfigs(): AgentFileConfig[] {
       );
     }
 
-    const { workspacePath, sessionDir, routing } = parsed.data;
+    const { workspacePath, sessionDir, model, skills, routing } = parsed.data;
     const resolvedWorkspace = resolvePath(workspacePath);
 
     configs.push({
@@ -87,6 +91,8 @@ export function loadAgentConfigs(): AgentFileConfig[] {
       // each startup so pimono discovers it via its AGENTS.md walk.
       memoryPath: join(CONFIG_DIR, `${name}.md`),
       sessionDir: resolvePath(sessionDir),
+      model,
+      skills: skills?.map(resolvePath),
       routing,
     });
   }
