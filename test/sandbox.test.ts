@@ -25,12 +25,14 @@ const hasBwrap = os === 'linux' && (() => {
 const hasSandbox = hasSandboxExec || hasBwrap;
 
 const workspace = join(tmpdir(), `monoclaw-sandbox-test-${Date.now()}`);
+const sessionDir = join(workspace, 'sessions');
 const nodeModulesPath = join(process.cwd(), 'node_modules');
 const nodePath = process.execPath;
 const proxyPort = 9999;
 
 beforeAll(() => {
   mkdirSync(workspace, { recursive: true });
+  mkdirSync(sessionDir, { recursive: true });
   writeFileSync(join(workspace, 'hello.txt'), 'hello from workspace', 'utf-8');
 });
 
@@ -48,6 +50,7 @@ process.stdout.write(data);`,
     const { cmd, args, spawnOpts } = buildSandboxedSpawn(testScript, [], process.env, {
       agentName: 'test-agent',
       workspacePath: workspace,
+      sessionDir,
       proxyPort,
       nodeModulesPath,
       nodePath,
@@ -66,7 +69,7 @@ process.stdout.write(data);`,
   it('T7: sandbox denies writing files outside workspace', () => {
     // Note: sandbox-exec with modern Node.js requires broad file-read* (subpath "/")
     // to avoid startup hangs caused by unpredictable Node internals.
-    // The write restriction (workspace-only) is the primary sandbox security value.
+    // The write restriction (workspace + sessionDir only) is the primary sandbox security value.
     const testScript = join(workspace, 'escape-test.mjs');
     // Try to write to the user's home dir — clearly outside the workspace
     const escapeTarget = join(homedir(), 'monoclaw-escape-test.txt');
@@ -85,6 +88,7 @@ try {
     const { cmd, args, spawnOpts } = buildSandboxedSpawn(testScript, [], process.env, {
       agentName: 'test-agent',
       workspacePath: workspace,
+      sessionDir,
       proxyPort,
       nodeModulesPath,
       nodePath,
@@ -106,6 +110,7 @@ describe.skipIf(hasSandbox)('sandbox not available', () => {
     const { cmd } = buildSandboxedSpawn('worker.js', [], {}, {
       agentName: 'test',
       workspacePath: workspace,
+      sessionDir,
       proxyPort,
       nodeModulesPath,
       nodePath,

@@ -16,7 +16,8 @@ import { SpawnOptions } from 'node:child_process';
 
 export interface SandboxConfig {
   agentName: string;
-  workspacePath: string;    // Only path the worker can read/write
+  workspacePath: string;    // Agent workspace path (read/write)
+  sessionDir: string;       // Persistent session directory (read/write)
   proxyPort: number;        // Credential proxy port (only allowed outbound network)
   nodeModulesPath: string;  // node_modules path to allow read access
   nodePath: string;         // Path to node binary
@@ -84,6 +85,9 @@ function writeMacosSeatbeltPolicy(cfg: SandboxConfig): string {
   const resolvedWorkspace = (() => {
     try { return realpathSync(cfg.workspacePath); } catch { return cfg.workspacePath; }
   })();
+  const resolvedSessionDir = (() => {
+    try { return realpathSync(cfg.sessionDir); } catch { return cfg.sessionDir; }
+  })();
   const resolvedNodeModules = (() => {
     try { return realpathSync(cfg.nodeModulesPath); } catch { return cfg.nodeModulesPath; }
   })();
@@ -106,9 +110,10 @@ function writeMacosSeatbeltPolicy(cfg: SandboxConfig): string {
 ; that vary by install method; locking these down causes hard-to-debug hangs)
 (allow file-read* (subpath "/"))
 
-; Allow writes only to the agent workspace and node's own temp space
+; Allow writes only to the agent workspace, session directory, and node temp
 (allow file-write*
   (subpath "${resolvedWorkspace}")
+  (subpath "${resolvedSessionDir}")
   (subpath "/private/tmp"))
 
 ; Allow process execution (node, child processes spawned by tools)
@@ -151,8 +156,9 @@ function buildLinuxSandbox(
     '--ro-bind', '/lib64', '/lib64',
     '--ro-bind', nodeRoot, nodeRoot,
     '--ro-bind', cfg.nodeModulesPath, cfg.nodeModulesPath,
-    // Agent workspace: read/write
+    // Agent workspace and session storage: read/write
     '--bind', cfg.workspacePath, cfg.workspacePath,
+    '--bind', cfg.sessionDir, cfg.sessionDir,
     // Minimal devices
     '--dev', '/dev',
     '--proc', '/proc',

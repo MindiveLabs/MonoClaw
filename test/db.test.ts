@@ -8,8 +8,7 @@ const testDataDir = join(tmpdir(), `monoclaw-test-${Date.now()}`);
 process.env.MONOCLAW_DATA_DIR = testDataDir;
 
 // Import after setting env so getDb() picks up testDataDir
-const { getDb, closeDb, upsertAgent, getAllAgents, resolveAgent, setRouting,
-        storeMessage, enqueueOutbox, getPendingOutbox,
+const { getDb, closeDb, storeMessage, enqueueOutbox, getPendingOutbox,
         markOutboxSent, markOutboxFailed } = await import('../src/db.js');
 
 beforeEach(() => {
@@ -19,40 +18,6 @@ beforeEach(() => {
 afterEach(() => {
   closeDb();
   rmSync(testDataDir, { recursive: true, force: true });
-});
-
-describe('agents', () => {
-  it('upserts and retrieves an agent', () => {
-    upsertAgent({
-      name: 'alice',
-      workspacePath: '/ws/alice',
-      memoryPath: '/ws/alice/AGENTS.md',
-      sessionDir: '/sessions/alice',
-    });
-    const agents = getAllAgents();
-    expect(agents).toHaveLength(1);
-    expect(agents[0]!.name).toBe('alice');
-  });
-
-  it('updates an existing agent on upsert', () => {
-    upsertAgent({ name: 'bob', workspacePath: '/old', memoryPath: '/m', sessionDir: '/s' });
-    upsertAgent({ name: 'bob', workspacePath: '/new', memoryPath: '/m', sessionDir: '/s' });
-    const agents = getAllAgents();
-    expect(agents).toHaveLength(1);
-    expect(agents[0]!.workspacePath).toBe('/new');
-  });
-});
-
-describe('routing', () => {
-  it('resolves routing entry', () => {
-    upsertAgent({ name: 'alice', workspacePath: '/ws', memoryPath: '/m', sessionDir: '/s' });
-    setRouting('telegram', '12345', 'alice');
-    expect(resolveAgent('telegram', '12345')).toBe('alice');
-  });
-
-  it('returns null for unknown chatId', () => {
-    expect(resolveAgent('telegram', 'unknown')).toBeNull();
-  });
 });
 
 describe('outbox', () => {

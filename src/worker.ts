@@ -48,6 +48,53 @@ function debugLog(message: string): void {
   process.stderr.write(`[worker:${AGENT_NAME}] ${message}\n`);
 }
 
+// Minimal interface for the parts of SessionManager used in session rollback.
+// Matches the pimono API; extracted here so tests can provide plain objects.
+export interface SessionManagerLike {
+  buildSessionContext(): { messages: unknown[] };
+  getBranch(): Array<{ type: string; id: string; message?: unknown }>;
+  branch(id: string): void;
+  resetLeaf(): void;
+}
+
+/**
+ * Detects and recovers from an incomplete session turn left by a worker that
+ * was killed mid-generation. Rolls the session leaf back to the last complete
+ * assistant response, or resets to empty context if no complete turn exists.
+ * Exported for unit testing.
+ */
+export function applySessionRollback(
+  sessionManager: SessionManagerLike,
+  debugLog: (msg: string) => void,
+): void {
+  const priorContext = sessionManager.buildSessionContext();
+  if (priorContext.messages.length === 0) return;
+
+  const lastMsg = priorContext.messages.at(-1) as Record<string, unknown>;
+  const lastRole = typeof lastMsg?.role === 'string' ? lastMsg.role : null;
+  const lastStopReason = typeof lastMsg?.stopReason === 'string' ? lastMsg.stopReason : null;
+  const isTurnComplete = lastRole === 'assistant' && lastStopReason !== 'toolUse';
+  if (isTurnComplete) return;
+
+  const branch = sessionManager.getBranch();
+  let lastCompleteId: string | undefined;
+  for (const entry of branch) {
+    if (entry.type === 'message') {
+      const msg = entry.message as unknown as Record<string, unknown>;
+      if (msg.role === 'assistant' && msg.stopReason !== 'toolUse') {
+        lastCompleteId = entry.id;
+      }
+    }
+  }
+  if (lastCompleteId) {
+    sessionManager.branch(lastCompleteId);
+    debugLog('Prior generation was interrupted — rolled back session to last complete turn');
+  } else {
+    sessionManager.resetLeaf();
+    debugLog('Prior generation was interrupted before any complete turn — starting with empty context');
+  }
+}
+
 function getLastAssistantMeta(session: {
   messages: Array<Record<string, unknown>>;
 }): { stopReason?: string; errorMessage?: string } {
@@ -80,6 +127,15 @@ async function main(): Promise<void> {
 
   // Continue the most recent session for this agent, or start fresh.
   const sessionManager = SessionManager.continueRecent(WORKSPACE!, SESSION_DIR);
+
+  // Detect and recover from an incomplete turn caused by the worker being killed
+  // mid-generation. pimono writes user messages to disk before the LLM call
+  // completes, so an interrupted generation leaves the session ending with an
+  // unanswered user message or a partial tool-use turn. On the next start,
+  // sending a new prompt would cause consecutive user-role messages → Anthropic
+  // API error. We roll back the session leaf to the last complete assistant
+  // response so the session is in a valid state.
+  applySessionRollback(sessionManager, debugLog);
 
   // Build createAgentSession options. If we have a proxy, we need to pass a
   // model with the proxy baseUrl. We let pimono pick the default model from
