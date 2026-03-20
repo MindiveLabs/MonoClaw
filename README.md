@@ -217,6 +217,8 @@ curl -s -X POST "$BASE/v1/agents/alice/messages" \
 # data: {"type":"delta","text":" leaves fall\n"}
 # ...
 # data: {"type":"done","text":"Autumn leaves fall\n..."}
+# (if agent is restarted mid-stream)
+# data: {"type":"error","message":"agent restarted"}
 ```
 
 ## Environment variables
