@@ -1,0 +1,7 @@
+{
+  "workspacePath": ".runtime/workspaces/alice",
+  "sessionDir": ".runtime/sessions/alice",
+  "routing": [
+    { "channel": "stdio", "chatId": "alice" }
+  ]
+}

@@ -1,11 +1,10 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { homedir } from 'node:os';
-import type { AgentConfig, OutboxRow } from './types.js';
+import { join } from 'node:path';
+import type { OutboxRow } from './types.js';
 
 const DATA_DIR =
-  process.env.MONOCLAW_DATA_DIR ?? join(homedir(), '.monoclaw');
+  process.env.MONOCLAW_DATA_DIR ?? join(process.cwd(), '.runtime');
 const DB_PATH = join(DATA_DIR, 'monoclaw.db');
 
 let _db: Database.Database | null = null;
@@ -28,21 +27,6 @@ export function closeDb(): void {
 
 function initSchema(db: Database.Database): void {
   db.exec(`
-    CREATE TABLE IF NOT EXISTS agents (
-      name        TEXT PRIMARY KEY,
-      workspace_path TEXT NOT NULL,
-      memory_path    TEXT NOT NULL,
-      session_dir    TEXT NOT NULL,
-      created_at     TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS routing (
-      channel_name TEXT NOT NULL,
-      chat_id      TEXT NOT NULL,
-      agent_name   TEXT NOT NULL,
-      PRIMARY KEY (channel_name, chat_id)
-    );
-
     CREATE TABLE IF NOT EXISTS messages (
       id         TEXT PRIMARY KEY,
       agent_name TEXT NOT NULL,
@@ -81,61 +65,6 @@ function pruneOldMessages(db: Database.Database): void {
   db.prepare(
     `DELETE FROM messages WHERE timestamp < datetime('now', '-30 days')`,
   ).run();
-}
-
-// ── Agents ────────────────────────────────────────────────────────────────
-
-export function getAllAgents(): AgentConfig[] {
-  return getDb()
-    .prepare(
-      `SELECT name,
-              workspace_path AS workspacePath,
-              memory_path    AS memoryPath,
-              session_dir    AS sessionDir
-       FROM agents`,
-    )
-    .all() as AgentConfig[];
-}
-
-export function upsertAgent(cfg: AgentConfig): void {
-  getDb()
-    .prepare(
-      `INSERT INTO agents (name, workspace_path, memory_path, session_dir, created_at)
-       VALUES (?, ?, ?, ?, datetime('now'))
-       ON CONFLICT(name) DO UPDATE SET
-         workspace_path = excluded.workspace_path,
-         memory_path    = excluded.memory_path,
-         session_dir    = excluded.session_dir`,
-    )
-    .run(cfg.name, cfg.workspacePath, cfg.memoryPath, cfg.sessionDir);
-}
-
-// ── Routing ───────────────────────────────────────────────────────────────
-
-export function resolveAgent(
-  channelName: string,
-  chatId: string,
-): string | null {
-  const row = getDb()
-    .prepare(
-      'SELECT agent_name FROM routing WHERE channel_name = ? AND chat_id = ?',
-    )
-    .get(channelName, chatId) as { agent_name: string } | undefined;
-  return row?.agent_name ?? null;
-}
-
-export function setRouting(
-  channelName: string,
-  chatId: string,
-  agentName: string,
-): void {
-  getDb()
-    .prepare(
-      `INSERT INTO routing (channel_name, chat_id, agent_name)
-       VALUES (?, ?, ?)
-       ON CONFLICT(channel_name, chat_id) DO UPDATE SET agent_name = excluded.agent_name`,
-    )
-    .run(channelName, chatId, agentName);
 }
 
 // ── Messages ──────────────────────────────────────────────────────────────
