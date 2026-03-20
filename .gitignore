@@ -2,9 +2,16 @@ node_modules/
 dist/
 coverage/
 
+# Legacy root .env (config now lives in config/.env)
 .env
 .env.local
 .env.*.local
+
+# Runtime data directory
+.runtime/
+
+# Agent secret config (copy from config/.env.example)
+config/.env
 
 .DS_Store
 
