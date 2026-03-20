@@ -87,4 +87,45 @@ describe('loadAgentConfigs', () => {
     );
     expect(() => loadAgentConfigs()).toThrow(/Invalid agent config/);
   });
+
+  it('passes through optional model field', () => {
+    writeFileSync(
+      join(agentsDir, 'modeled.json'),
+      JSON.stringify({
+        workspacePath: '.runtime/workspaces/modeled',
+        sessionDir: '.runtime/sessions/modeled',
+        model: 'claude-opus-4-5',
+        routing: [],
+      }),
+    );
+    const [cfg] = loadAgentConfigs();
+    expect(cfg!.model).toBe('claude-opus-4-5');
+  });
+
+  it('resolves skills paths relative to cwd', () => {
+    writeFileSync(
+      join(agentsDir, 'skilled.json'),
+      JSON.stringify({
+        workspacePath: '.runtime/workspaces/skilled',
+        sessionDir: '.runtime/sessions/skilled',
+        skills: ['./skills/my-skill', '/absolute/skill'],
+        routing: [],
+      }),
+    );
+    const [cfg] = loadAgentConfigs();
+    expect(cfg!.skills).toEqual([
+      resolve(testDir, 'skills/my-skill'),
+      '/absolute/skill',
+    ]);
+  });
+
+  it('leaves model and skills undefined when omitted', () => {
+    writeFileSync(
+      join(agentsDir, 'bare.json'),
+      JSON.stringify({ workspacePath: '.runtime/w', sessionDir: '.runtime/s' }),
+    );
+    const [cfg] = loadAgentConfigs();
+    expect(cfg!.model).toBeUndefined();
+    expect(cfg!.skills).toBeUndefined();
+  });
 });
