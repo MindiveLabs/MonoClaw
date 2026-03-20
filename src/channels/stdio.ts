@@ -47,10 +47,14 @@ class StdioChannel implements Channel {
       }
 
       // /agent <name> — switch active agent
-      if (trimmed.startsWith('/agent ')) {
+      if (trimmed === '/agent' || trimmed.startsWith('/agent ')) {
         const name = trimmed.slice(7).trim();
         if (!name) {
           process.stdout.write(`Usage: /agent <name>  •  available: ${this.knownAgents.join(', ')}\n\n${this.promptStr}`);
+          return;
+        }
+        if (this.knownAgents.length > 0 && !this.knownAgents.includes(name)) {
+          process.stdout.write(`Unknown agent "${name}".  Available: ${this.knownAgents.join(', ')}\n\n${this.promptStr}`);
           return;
         }
         this.switchAgent(name);
