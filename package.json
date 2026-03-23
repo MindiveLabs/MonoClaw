@@ -1,14 +1,21 @@
 {
   "name": "monoclaw",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Lightweight multi-agent runtime: pimono agents + OS-level sandboxing + message channels.",
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    "./plugin-sdk": {
+      "types": "./dist/plugin-sdk.d.ts",
+      "default": "./dist/plugin-sdk.js"
+    }
+  },
   "bin": {
     "monoclaw": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
+    "prepare": "npm run build",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",

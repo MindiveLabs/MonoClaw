@@ -127,6 +127,54 @@ Edit `config/agents/<name>/<name>.md` to give the agent a persona, instructions,
 
 To add or change routing, edit the JSON and restart MonoClaw.
 
+### Plugin channels
+
+Drop a directory into `config/plugins/` to add a new messaging channel without touching MonoClaw core:
+
+```
+config/plugins/
+  my-channel/
+    openclaw.plugin.json   — manifest (must have "id")
+    index.js               — compiled entry point
+```
+
+**`openclaw.plugin.json`** (same format as OpenClaw):
+```json
+{ "id": "my-channel", "channels": ["my-channel"] }
+```
+
+**`index.js`** (TypeScript: `import { defineChannelPluginEntry } from 'monoclaw/plugin-sdk'`):
+```js
+export default {
+  id: 'my-channel',
+  name: 'My Channel',
+  toChannel() {
+    return {
+      name: 'my-channel',
+      async send(chatId, text) { /* deliver text to chatId */ },
+      onMessage(handler) { /* call handler({ channelName, chatId, text }) on inbound */ },
+      async start() { /* connect, start polling, etc. */ },
+      async stop() { /* teardown */ },
+    };
+  },
+  applyRuntime(rt) {
+    // rt.env — process.env, rt.logger — pino logger
+    // Called synchronously at load time; defer async init to start()
+  },
+};
+```
+
+Then add routing entries to your agent config and restart:
+```json
+{ "channel": "my-channel", "chatId": "some-id" }
+```
+
+Override the plugins directory: `MONOCLAW_PLUGINS_DIR=/path/to/plugins`.
+
+See `config/plugins/example-echo/` for a minimal working example.
+
+**Security note:** Plugins run in the orchestrator process and inherit full access to `process.env` (including `ANTHROPIC_API_KEY`). Only load plugins you trust — plugin code is not sandboxed.
+
 ### Run
 
 ```bash

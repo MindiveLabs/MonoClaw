@@ -1,0 +1,9 @@
+{
+  "id": "echo",
+  "channels": ["echo"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

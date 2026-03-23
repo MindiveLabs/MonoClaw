@@ -1,5 +1,25 @@
 # TODOS
 
+## npm-installable plugins
+
+**Let developers install MonoClaw plugins via npm.**
+
+Currently plugins must be copied into `config/plugins/<name>/` as local directories. A natural next step is supporting plugins declared in a `config/plugins.json` (or `package.json` dependencies) and loaded from `node_modules`.
+
+**Why:** Enables a distribution story — `npm install monoclaw-plugin-discord` plus a config entry, and the channel is live on restart. Makes plugin sharing trivial.
+
+**Pros:** Community ecosystem; plugins are versioned and updatable like any npm package.
+
+**Cons:** Adds a new config surface (`config/plugins.json`); ~150 more lines in core; plugin authors need to publish to npm.
+
+**Context:** The plugin system (v1) was intentionally scoped to directory-based loading to stay under 200 new lines. npm loading is Approach C from the design doc. The loader already dynamically imports `index.js` — the main addition is scanning `node_modules` and a `config/plugins.json` to declare which packages to load.
+
+**Where to start:** `src/plugin-loader.ts` — add a second scan after the directory scan; read `config/plugins.json` for package names; import `<pkg>/dist/index.js` from `node_modules`.
+
+**Depends on:** v1 plugin system (done).
+
+---
+
 ## macOS sandbox deprecation
 
 **Replace `sandbox-exec` with a non-deprecated macOS sandboxing mechanism.**
