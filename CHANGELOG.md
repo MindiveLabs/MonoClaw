@@ -3,6 +3,32 @@
 All notable changes to MonoClaw are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.0] - 2026-03-23
+
+### Added
+- **Plugin system**: Third-party channel plugins can be loaded from `config/plugins/<name>/` at
+  startup. Each plugin directory needs an `openclaw.plugin.json` manifest (with an `"id"` field)
+  and an `index.js` entry point that exports a `defineChannelPluginEntry()` result.
+- **Plugin SDK** (`monoclaw/plugin-sdk`): Provides `defineChannelPluginEntry`, `MonoClawChannelPlugin`,
+  `MonoClawRuntime`, and `InboundMessage` — same function name and compatible shape as OpenClaw's
+  plugin SDK. Plugin authors familiar with OpenClaw feel at home.
+- **`MONOCLAW_PLUGINS_DIR` env var**: Override the default `config/plugins/` directory.
+- **Example echo plugin**: `config/plugins/example-echo/` demonstrates the minimal plugin shape.
+- **Security hardening for plugin loader**: symlink escape prevention (realpath boundary check),
+  fast-path duplicate-channel guard before any plugin code runs, channel shape validation after
+  `toChannel()`, and name-to-manifest-id match enforcement.
+- **Per-channel start error isolation**: if a channel's `start()` throws, MonoClaw logs the error
+  and continues with the remaining channels rather than crashing the process.
+- **`prepare` script in `package.json`**: `npm install` now auto-builds the TypeScript output,
+  making the package usable immediately after `npm install` in plugin projects.
+
+### Changed
+- **`package.json` exports**: Added `"./plugin-sdk"` export with `types` + `default` conditions
+  so plugin authors can `import { defineChannelPluginEntry } from 'monoclaw/plugin-sdk'` after
+  installing the package. Removed the previously unused `"."` export.
+- **Startup sequence**: Step 4 is now "load plugin channels" (before starting any channels),
+  making the ordering explicit in both code and comments.
+
 ## [0.2.2] - 2026-03-20
 
 ### Added
