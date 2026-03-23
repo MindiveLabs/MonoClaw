@@ -5,11 +5,13 @@
  *   1. Load config/.env into process.env (env.ts runs as a side effect)
  *   2. Start credential proxy (injects real API key for sandboxed workers)
  *   3. Load agents from config/agents/*.json and spawn sandboxed workers
- *   4. Start message channels (Telegram, stdio)
- *   5. Route inbound messages → agents via config routing table
- *   6. Flush outbox → channels on a poll interval
+ *   4. Load plugin channels from config/plugins/ (or MONOCLAW_PLUGINS_DIR)
+ *   5. Start all channels (built-in + plugins)
+ *   6. Route inbound messages → agents via config routing table
+ *   7. Flush outbox → channels on a poll interval
  *
  * To add an agent: create config/agents/<name>.json and restart.
+ * To add a plugin channel: drop a directory in config/plugins/ and restart.
  * To change routing: edit the "routing" array in the agent config and restart.
  */
 
@@ -30,6 +32,7 @@ import {
   DATA_DIR,
 } from './db.js';
 import { loadAgentConfigs } from './config.js';
+import { loadPlugins } from './plugin-loader.js';
 import { startApi } from './api.js';
 import { flushLogger, logger } from './logger.js';
 import { printStdioBanner } from './channels/stdio.js';
@@ -67,7 +70,11 @@ async function main(): Promise<void> {
   // 3. Start HTTP API
   await startApi(agents, agentConfigs, DATA_DIR, logger.child({ component: 'api' }));
 
-  // 4. Start channels
+  // 4. Load plugin channels from config/plugins/
+  await loadPlugins({ env: process.env, logger });
+
+  // 5. Start channels (built-in channels registered via import side-effects above;
+  //    plugin channels registered by loadPlugins above)
   const channels = getAllChannels();
   if (channels.length === 0) {
     logger.warn(
@@ -89,11 +96,15 @@ async function main(): Promise<void> {
       agent.prompt(msg.text, msg.chatId, msg.channelName);
     });
 
-    await channel.start();
-    logger.info({ channel: channel.name }, 'channel started');
+    try {
+      await channel.start();
+      logger.info({ channel: channel.name }, 'channel started');
+    } catch (err) {
+      logger.error({ channel: channel.name, err }, 'channel failed to start — skipping');
+    }
   }
 
-  // 5. Outbox flush loop
+  // 6. Outbox flush loop
   startOutboxFlush(channels);
 
   logger.info('MonoClaw ready');
